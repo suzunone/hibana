@@ -28,7 +28,7 @@ If for some reason you want manually control this:
   }
   ```
 
-* Add the following class to the providers array in config/app.php
+* Add the following class to the providers array in bootstrap/providers.php
 
 ``` php
 Suzunone\Hibana\Providers\HibanaServiceProvider::class
