@@ -1,0 +1,18 @@
+<?php
+
+namespace DummyNamespace;
+
+use Generator;
+use Suzunone\Hibana\Contracts\StaticSiteGenerator;
+
+class DummyClass implements StaticSiteGenerator
+{
+    /**
+     * @return \Generator<\Suzunone\Hibana\Contracts\StaticSiteFactory>
+     */
+    public function execute(): Generator
+    {
+        // yield a HibanaFactory class
+        // yield new DummyClassFactory();
+    }
+}

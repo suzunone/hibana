@@ -1,0 +1,21 @@
+<?php
+
+namespace DummyNamespace;
+
+use Suzunone\Hibana\Contracts\StaticSiteFactory;
+
+class DummyClass implements StaticSiteFactory
+{
+
+    public function url(): string
+    {
+        // URL to be routed
+        return '';
+    }
+
+    public function savePath(): string
+    {
+        // Where to store static content
+        return '';
+    }
+}
