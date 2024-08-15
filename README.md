@@ -7,7 +7,7 @@ Installation
 Require this package with composer using the following command:
 
 ```bash
-composer require --dev suzunone/hibana
+composer require --dev suzunone/hibana dev-main
 ```
 
 > [!NOTE]  
