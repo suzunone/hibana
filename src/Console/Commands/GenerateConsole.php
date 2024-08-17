@@ -51,11 +51,17 @@ class GenerateConsole extends Command
             foreach ($generator->execute() as $factory) {
                 throw_unless($factory instanceof StaticSiteFactory, RuntimeException::class, sprintf('%s does not implement %s', get_class($factory), StaticSiteFactory::class));
                 $body = $httpRequest->getBody($factory->url());
+
+                if ($httpRequest->getLastStatus() !== 200) {
+                    $this->components->warn(sprintf('Executed %s status is %s.', $factory->url(), $httpRequest->getLastStatus() ));
+                }
+
                 Storage::disk($this->config->get('hibana.storage_disk', 'app'))
                     ->put($this->config->get('hibana.artifact_path') . $factory->savePath(), $body);
 
                 $path = Storage::disk($this->config->get('hibana.storage_disk', 'app'))
                     ->path($this->config->get('hibana.artifact_path') . $factory->savePath());
+
                 $this->components->info(sprintf('Static contents %s [%s] created successfully.', $path, $factory->url()));
             }
         }

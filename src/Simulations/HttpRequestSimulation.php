@@ -31,6 +31,9 @@ class HttpRequestSimulation
         InteractsWithViews;
 
 
+    protected int $last_status;
+
+
     /**
      * Body of the execution result
      * @param $uri
@@ -43,7 +46,14 @@ class HttpRequestSimulation
 
         $response = $this->get($uri, $headers);
 
+        $this->last_status = $response->status();
+
         return $response->baseResponse->content();
+    }
+
+    public function getLastStatus():int
+    {
+        return $this->last_status;
     }
 
     /**
