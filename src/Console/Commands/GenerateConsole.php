@@ -52,12 +52,11 @@ class GenerateConsole extends Command
         }
 
         foreach ($keys as $gkey) {
-
             $tasks[] = function () use ($gkey) {
                 $httpRequest = new HttpRequestSimulation;
 
                 $iterate = 0;
-                $std = '';
+                $std = [];
 
                 app()->make('view.engine.resolver')->register('blade', function () {
                     return new \Illuminate\View\Engines\CompilerEngine(app()->get('blade.compiler'));
@@ -73,29 +72,27 @@ class GenerateConsole extends Command
                     throw_unless($factory instanceof StaticSiteFactory, RuntimeException::class, sprintf('%s does not implement %s', get_class($factory), StaticSiteFactory::class));
                     $body = $httpRequest->getBody($factory->url());
 
-                    if ($httpRequest->getLastStatus() !== 200) {
-                        return sprintf('Executed %s status is %s.', $factory->url(), $httpRequest->getLastStatus() );
-                    }
-
                     Storage::disk(config()->get('hibana.storage_disk', 'app'))
                         ->put(config()->get('hibana.artifact_path') . $factory->savePath(), $body);
 
+                    if ($httpRequest->getLastStatus() !== 200) {
+                        $std[] = [sprintf('Executed %s status is %s.', $factory->url(), $httpRequest->getLastStatus())];
+                        return $std;
+                    }
+
                     $path = Storage::disk(config()->get('hibana.storage_disk', 'app'))->path(config()->get('hibana.artifact_path') . $factory->savePath());
 
-                    $std .= sprintf('Static contents %s [%s] created successfully.', $path, $factory->url())."\n";
+                    $std[] = sprintf('Static contents %s [%s] created successfully.', $path, $factory->url()) . "\n";
 
 
+                    // メモリ解放
                     if ($iterate++ >= 100) {
-                        // 1. ビューの状態をクリア
                         View::flushState();
 
-                        // ② ViewFinderが内部にキャッシュしている「解決済みファイルパス」のマップをクリア
-                        // ※これをしないと、ファイルパスの文字列がループの数だけメモリに蓄積されます
                         if (app()->bound('view.finder')) {
                             app('view.finder')->flush();
                         }
 
-                        // 3. コンテナにキャッシュされているViewファクトリ自体を再生成（※特に有効）
                         app()->forgetInstance('view');
                         app()->make('view');
                         app()->forgetInstance('blade.compiler');
@@ -105,20 +102,22 @@ class GenerateConsole extends Command
                             return new \Illuminate\View\Engines\CompilerEngine(app()->get('blade.compiler'));
                         });
 
-                        // 4. PHPにメモリ解放を促す
                         gc_collect_cycles();
                         $iterate = 0;
                     }
                 }
 
 
-                return "Key [{$gkey}] の処理が成功しました。\n{$std}"; // 結果テキストを返す
+                $std[] = "Key [{$gkey}] の処理が成功しました。";
+                return $std;
             };
         }
 
 
-        foreach (Concurrency::driver(config()->get('hibana.concurrency_driver'))->run($tasks) as $message) {
-            $this->components->info($message);
+        foreach (Concurrency::driver(config()->get('hibana.concurrency_driver'))->run($tasks) as $messages) {
+            foreach ($messages as $message) {
+                $this->components->info($message);
+            }
         }
     }
 
