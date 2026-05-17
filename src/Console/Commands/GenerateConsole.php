@@ -12,6 +12,7 @@ use Suzunone\Hibana\Simulations\HttpRequestSimulation;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Concurrency;
 
 #[AsCommand(name: 'hibana:generator')]
 class GenerateConsole extends Command
@@ -21,14 +22,14 @@ class GenerateConsole extends Command
      *
      * @var string
      */
-    protected $signature = 'hibana:generator';
+    protected $signature = 'hibana:generator {keys?* : 処理対象のID（複数指定可）省略した場合は全実行}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Command description';
+    protected $description = 'hibana generates static pages.';
 
 
     public function __construct(public Repository $config)
@@ -40,71 +41,85 @@ class GenerateConsole extends Command
      * Execute the console command.
      *
      * @throws \Throwable
+     * @noinspection PhpUnreachableStatementInspection
      */
     public function handle(): void
     {
-        $httpRequest = $this->httpRequestSimulation();
-
-        $iterate = 0;
-
-        app()->make('view.engine.resolver')->register('blade', function () {
-            return new \Illuminate\View\Engines\CompilerEngine(app()->get('blade.compiler'));
-        });
-        foreach ($this->config->get('hibana.generators') as $generator_name) {
-            $generator = new $generator_name;
-            throw_unless($generator instanceof StaticSiteGenerator, RuntimeException::class, sprintf('%s does not implement %s', $generator_name, StaticSiteGenerator::class));
-
-            $this->components->info(sprintf('Execute generator [%s].', $generator_name));
-            foreach ($generator->execute() as $factory) {
-                throw_unless($factory instanceof StaticSiteFactory, RuntimeException::class, sprintf('%s does not implement %s', get_class($factory), StaticSiteFactory::class));
-                $body = $httpRequest->getBody($factory->url());
-
-                if ($httpRequest->getLastStatus() !== 200) {
-                    $this->components->warn(sprintf('Executed %s status is %s.', $factory->url(), $httpRequest->getLastStatus() ));
-                }
-
-                Storage::disk($this->config->get('hibana.storage_disk', 'app'))
-                    ->put($this->config->get('hibana.artifact_path') . $factory->savePath(), $body);
-
-                $path = Storage::disk($this->config->get('hibana.storage_disk', 'app'))
-                    ->path($this->config->get('hibana.artifact_path') . $factory->savePath());
-
-                $this->components->info(sprintf('Static contents %s [%s] created successfully.', $path, $factory->url()));
-
-                if ($iterate++ >= 100) {
-                    // 1. ビューの状態をクリア
-                    View::flushState();
-
-                    // ② ViewFinderが内部にキャッシュしている「解決済みファイルパス」のマップをクリア
-                    // ※これをしないと、ファイルパスの文字列がループの数だけメモリに蓄積されます
-                    if (app()->bound('view.finder')) {
-                        app('view.finder')->flush();
-                    }
-
-                    // 3. コンテナにキャッシュされているViewファクトリ自体を再生成（※特に有効）
-                    app()->forgetInstance('view');
-                    app()->make('view');
-                    app()->forgetInstance('blade.compiler');
-                    app()->forgetInstance('view.engine.resolver');
-
-                    app()->make('view.engine.resolver')->register('blade', function () {
-                        return new \Illuminate\View\Engines\CompilerEngine(app()->get('blade.compiler'));
-                    });
-
-                    // 4. PHPにメモリ解放を促す
-                    gc_collect_cycles();
-
-                    $this->components->info('flushState!!');
-                    $iterate = 0;
-                }
-            }
-
+        $tasks = [];
+        $keys = $this->argument('keys');
+        if (count($keys) === 0) {
+            $keys = array_keys(config()->get('hibana.generators'));
         }
 
+        foreach ($keys as $gkey) {
+
+            $tasks[] = function () use ($gkey) {
+                $httpRequest = new HttpRequestSimulation;
+
+                $iterate = 0;
+                $std = '';
+
+                app()->make('view.engine.resolver')->register('blade', function () {
+                    return new \Illuminate\View\Engines\CompilerEngine(app()->get('blade.compiler'));
+                });
+                $generators = config()->get('hibana.generators');
+
+                $generator_name = $generators[$gkey];
+                $generator = new $generator_name;
+                throw_unless($generator instanceof StaticSiteGenerator, RuntimeException::class, sprintf('%s does not implement %s', $generator_name, StaticSiteGenerator::class));
+
+                // $this->components->info(sprintf('Execute generator [%s].', $generator_name));
+                foreach ($generator->execute() as $factory) {
+                    throw_unless($factory instanceof StaticSiteFactory, RuntimeException::class, sprintf('%s does not implement %s', get_class($factory), StaticSiteFactory::class));
+                    $body = $httpRequest->getBody($factory->url());
+
+                    if ($httpRequest->getLastStatus() !== 200) {
+                        return sprintf('Executed %s status is %s.', $factory->url(), $httpRequest->getLastStatus() );
+                    }
+
+                    Storage::disk(config()->get('hibana.storage_disk', 'app'))
+                        ->put(config()->get('hibana.artifact_path') . $factory->savePath(), $body);
+
+                    $path = Storage::disk(config()->get('hibana.storage_disk', 'app'))->path(config()->get('hibana.artifact_path') . $factory->savePath());
+
+                    $std .= sprintf('Static contents %s [%s] created successfully.', $path, $factory->url())."\n";
+
+
+                    if ($iterate++ >= 100) {
+                        // 1. ビューの状態をクリア
+                        View::flushState();
+
+                        // ② ViewFinderが内部にキャッシュしている「解決済みファイルパス」のマップをクリア
+                        // ※これをしないと、ファイルパスの文字列がループの数だけメモリに蓄積されます
+                        if (app()->bound('view.finder')) {
+                            app('view.finder')->flush();
+                        }
+
+                        // 3. コンテナにキャッシュされているViewファクトリ自体を再生成（※特に有効）
+                        app()->forgetInstance('view');
+                        app()->make('view');
+                        app()->forgetInstance('blade.compiler');
+                        app()->forgetInstance('view.engine.resolver');
+
+                        app()->make('view.engine.resolver')->register('blade', function () {
+                            return new \Illuminate\View\Engines\CompilerEngine(app()->get('blade.compiler'));
+                        });
+
+                        // 4. PHPにメモリ解放を促す
+                        gc_collect_cycles();
+                        $iterate = 0;
+                    }
+                }
+
+
+                return "Key [{$gkey}] の処理が成功しました。\n{$std}"; // 結果テキストを返す
+            };
+        }
+
+
+        foreach (Concurrency::driver(config()->get('hibana.concurrency_driver'))->run($tasks) as $message) {
+            $this->components->info($message);
+        }
     }
 
-    public function httpRequestSimulation(): HttpRequestSimulation
-    {
-        return new HttpRequestSimulation;
-    }
 }
